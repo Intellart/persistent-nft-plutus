@@ -49,8 +49,10 @@ main =
     testGroup
         "all tests"
         [ simpleBuyTest
-        --, simpleBuyTwoTokensTest
-        --, multipleTokensInExistanceTest
+        , simpleBuyTwoTokensTest
+        , tokenClosingBuying
+        , tokenNotUniqueError
+        , tokenSaleCanceled
         ]
 
 nftEx1 :: StartParams
@@ -87,7 +89,6 @@ testAssetClassNft2 = assetClass (sCs nftEx2) (sTn nftEx2)
 
 
 -- We start the sale of NFT1 from wallet 3 and wallet 4 buys it.
--- We can notice that the fee has been deducted from the seller.
 simpleBuyTest :: TestTree
 simpleBuyTest = checkPredicateOptions
     (defaultCheckOptions & emulatorConfig .~ emCfg)
@@ -107,7 +108,7 @@ simpleBuyTest = checkPredicateOptions
 
     walletsChange :: TracePredicate
     walletsChange =
-             walletFundsChange w3 (Ada.lovelaceValueOf (980_000) <> assetClassValue testAssetClassNft1 (-1))
+             walletFundsChange w3 (Ada.lovelaceValueOf (1_000_000) <> assetClassValue testAssetClassNft1 (-1))
         .&&. walletFundsChange w4 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft1 1)
 
     emCfg :: EmulatorConfig
@@ -150,11 +151,11 @@ simpleBuyTwoTokensTest = checkPredicateOptions
 
     walletsChange :: TracePredicate
     walletsChange =
-             walletFundsChange w3 (Ada.lovelaceValueOf (980_000) <> assetClassValue testAssetClassNft1 (-1))
+             walletFundsChange w3 (Ada.lovelaceValueOf (1_000_000) <> assetClassValue testAssetClassNft1 (-1))
         .&&. walletFundsChange w4 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft1 1)
 
-        .&&. walletFundsChange w2 (Ada.lovelaceValueOf (980_000) <> assetClassValue testAssetClassNft2 (-1))
-        .&&. walletFundsChange w1 (Ada.lovelaceValueOf (-960_000) <> assetClassValue testAssetClassNft2 1)
+        .&&. walletFundsChange w2 (Ada.lovelaceValueOf (1_000_000) <> assetClassValue testAssetClassNft2 (-1))
+        .&&. walletFundsChange w1 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft2 1)
 
     emCfg :: EmulatorConfig
     emCfg = EmulatorConfig (Left dist) def def
@@ -168,12 +169,50 @@ simpleBuyTwoTokensTest = checkPredicateOptions
             , (w4, Ada.lovelaceValueOf 10_000_000)
             ]
 
--- We start the sale of NFT1 from wallet 3, but the NFT is not unique so the constraints are invalidated.
--- TODO(KS): Map to error!
-multipleTokensInExistanceTest :: TestTree
-multipleTokensInExistanceTest = checkPredicateOptions
+-- We start the sale of NFT1 from wallet 3, but the NFT is closed so the constraints are invalidated.
+-- This doesn't sell the NFT1, since it's closed.
+-- This doesn't work the other way around, you CANNOT CANCEL the SALE with CLOSE!
+tokenClosingBuying :: TestTree
+tokenClosingBuying = checkPredicateOptions
     (defaultCheckOptions & emulatorConfig .~ emCfg)
-    "multiple tokens buy trace"
+    "token closing then buying trace"
+    walletsChange
+    testTrace
+  where
+    testTrace :: EmulatorTrace ()
+    testTrace = do
+        h3 <- activateContractWallet w3 endpoints
+        h4 <- activateContractWallet w4 endpoints
+
+        callEndpoint @"close" h3 (nftEx1')
+        void $ Emulator.waitNSlots 1
+        callEndpoint @"start" h3 nftEx1
+        void $ Emulator.waitNSlots 1
+        callEndpoint @"buy" h4 (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+    walletsChange :: TracePredicate
+    walletsChange =
+             walletFundsChange w3 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+        .&&. walletFundsChange w4 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+
+
+    emCfg :: EmulatorConfig
+    emCfg = EmulatorConfig (Left dist) def def
+      where
+        dist = Map.fromList
+            [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
+                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1
+                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1)
+            , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
+            ]
+
+-- We start the sale of NFT1 from wallet 3, but the NFT is not unique.
+-- This doesn't sell the NFT1 the second time, since it's invalid to have more than one.
+tokenNotUniqueError :: TestTree
+tokenNotUniqueError = checkPredicateOptions
+    (defaultCheckOptions & emulatorConfig .~ emCfg)
+    "token not unique trace"
     walletsChange
     testTrace
   where
@@ -184,19 +223,64 @@ multipleTokensInExistanceTest = checkPredicateOptions
 
         callEndpoint @"start" h3 nftEx1
         void $ Emulator.waitNSlots 1
+        callEndpoint @"start" h3 nftEx1
+        void $ Emulator.waitNSlots 1
+        callEndpoint @"buy" h4 (nftEx1')
+        void $ Emulator.waitNSlots 1
         callEndpoint @"buy" h4 (nftEx1')
         void $ Emulator.waitNSlots 1
 
     walletsChange :: TracePredicate
-    walletsChange = pure True
+    walletsChange =
+             walletFundsChange w3 (Ada.lovelaceValueOf 1_000_000 <> assetClassValue testAssetClassNft1 (-1))
+        .&&. walletFundsChange w4 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft1 1)
+
 
     emCfg :: EmulatorConfig
     emCfg = EmulatorConfig (Left dist) def def
       where
         dist = Map.fromList
             [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
-                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1
-                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 2)
+                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 2
+                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1)
+            , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
+            ]
+
+
+-- We start the sale of NFT1 from wallet 3, but then (the user behind) wallet 3 cancels the sale.
+-- This doesn't sell the NFT1, since it's invalidated and being canceled.
+tokenSaleCanceled :: TestTree
+tokenSaleCanceled = checkPredicateOptions
+    (defaultCheckOptions & emulatorConfig .~ emCfg)
+    "token cancel trace"
+    walletsChange
+    testTrace
+  where
+    testTrace :: EmulatorTrace ()
+    testTrace = do
+        h3 <- activateContractWallet w3 endpoints
+        h4 <- activateContractWallet w4 endpoints
+
+        callEndpoint @"start" h3 nftEx1
+        void $ Emulator.waitNSlots 1
+        callEndpoint @"cancel" h3 (nftEx1')
+        void $ Emulator.waitNSlots 1
+        callEndpoint @"buy" h4 (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+    walletsChange :: TracePredicate
+    walletsChange =
+             walletFundsChange w3 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+        .&&. walletFundsChange w4 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+
+
+    emCfg :: EmulatorConfig
+    emCfg = EmulatorConfig (Left dist) def def
+      where
+        dist = Map.fromList
+            [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
+                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1
+                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1)
             , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
             ]
 

@@ -12,7 +12,6 @@ module Market.Types
     , StartParams (..)
     , BuyParams (..)
     , NFTSale (..)
-    , MarketParams (..)
     )
     where
 
@@ -27,14 +26,6 @@ import           Plutus.Contract  (Endpoint, type (.\/))
 import qualified PlutusTx
 import           PlutusTx.Prelude as Plutus (Eq (..), Integer, (&&))
 import           Schema           (ToSchema)
-
-newtype MarketParams = MarketParams
-    { feeAddr  :: PubKeyHash
-    } deriving (Generic, ToJSON, FromJSON)
-
-PlutusTx.makeIsDataIndexed ''MarketParams [('MarketParams, 0)]
-PlutusTx.makeLift ''MarketParams
-
 
 data NFTSale = NFTSale
     { nSeller   :: !PubKeyHash
@@ -86,9 +77,12 @@ data StartParams = StartParams
     } deriving (Pr.Eq, Pr.Ord, Show, Generic, ToJSON, FromJSON, ToSchema)
 
 
-type SaleSchema = Endpoint "close" BuyParams
-                  .\/
-                  Endpoint "buy" BuyParams
-                  .\/
-                  Endpoint "start" StartParams
+type SaleSchema =
+    Endpoint "start" StartParams
+    .\/
+    Endpoint "buy" BuyParams
+    .\/
+    Endpoint "cancel" BuyParams
+    .\/
+    Endpoint "close" BuyParams
 

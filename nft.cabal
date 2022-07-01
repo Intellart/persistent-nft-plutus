@@ -30,7 +30,6 @@ library
   exposed-modules:     Market.Types
                      , Market.Onchain
                      , Market.Offchain
-                     , Utility
                      , SerialiseJSON
   build-depends:       aeson
                      , base ^>=4.14.1.0
