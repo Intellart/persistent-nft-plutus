@@ -37,10 +37,12 @@ import           Market.Types           (BuyParams (..), StartParams (..))
 import           Plutus.Contract.Test
 import           Plutus.Trace.Emulator  as Emulator (EmulatorConfig (..),
                                                      EmulatorTrace,
+                                                     activateContract,
                                                      activateContractWallet,
                                                      callEndpoint,
                                                      runEmulatorTraceIO',
-                                                     waitNSlots)
+                                                     waitNSlots,
+                                                     walletInstanceTag)
 
 
 main :: IO ()
@@ -53,6 +55,8 @@ main =
         , tokenClosingBuying
         , tokenNotUniqueError
         , tokenSaleCanceled
+        , tokenClosingBuyingSellingBack
+        , tokenClosingBuyingSellingAnotherWallet
         ]
 
 nftEx1 :: StartParams
@@ -80,6 +84,7 @@ nftEx2' = BuyParams
     { bTn = sTn nftEx2
     , bCs = sCs nftEx2
     }
+
 
 testAssetClassNft1 :: AssetClass
 testAssetClassNft1 = assetClass (sCs nftEx1) (sTn nftEx1)
@@ -171,7 +176,6 @@ simpleBuyTwoTokensTest = checkPredicateOptions
 
 -- We start the sale of NFT1 from wallet 3, but the NFT is closed so the constraints are invalidated.
 -- This doesn't sell the NFT1, since it's closed.
--- This doesn't work the other way around, you CANNOT CANCEL the SALE with CLOSE!
 tokenClosingBuying :: TestTree
 tokenClosingBuying = checkPredicateOptions
     (defaultCheckOptions & emulatorConfig .~ emCfg)
@@ -181,30 +185,48 @@ tokenClosingBuying = checkPredicateOptions
   where
     testTrace :: EmulatorTrace ()
     testTrace = do
+
         h3 <- activateContractWallet w3 endpoints
         h4 <- activateContractWallet w4 endpoints
 
-        callEndpoint @"close" h3 (nftEx1')
-        void $ Emulator.waitNSlots 1
         callEndpoint @"start" h3 nftEx1
         void $ Emulator.waitNSlots 1
+
+        h3' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"close" h3' (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        -- Can't buy, closed.
         callEndpoint @"buy" h4 (nftEx1')
         void $ Emulator.waitNSlots 1
 
+        h3'' <- activateContractWallet w3 endpoints
+
+        -- Starting the sale again.
+        callEndpoint @"start" h3'' nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h4' <- activateContractWallet w4 endpoints
+
+        -- Buying the NFT.
+        callEndpoint @"buy" h4' (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+
     walletsChange :: TracePredicate
     walletsChange =
-             walletFundsChange w3 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
-        .&&. walletFundsChange w4 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
-
+             walletFundsChange w3 (Ada.lovelaceValueOf (1_000_000) <> assetClassValue testAssetClassNft1 (-1))
+        .&&. walletFundsChange w4 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft1 1)
 
     emCfg :: EmulatorConfig
     emCfg = EmulatorConfig (Left dist) def def
       where
         dist = Map.fromList
-            [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
+            [ (w3, Ada.lovelaceValueOf 10_000_000
                 <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1
                 <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1)
-            , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
+            , (w4, Ada.lovelaceValueOf 10_000_000)
             ]
 
 -- We start the sale of NFT1 from wallet 3, but the NFT is not unique.
@@ -240,10 +262,10 @@ tokenNotUniqueError = checkPredicateOptions
     emCfg = EmulatorConfig (Left dist) def def
       where
         dist = Map.fromList
-            [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
+            [ (w3, Ada.lovelaceValueOf 10_000_000
                 <> Value.singleton (sCs nftEx1) (sTn nftEx1) 2
                 <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1)
-            , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
+            , (w4, Ada.lovelaceValueOf 10_000_000)
             ]
 
 
@@ -258,14 +280,83 @@ tokenSaleCanceled = checkPredicateOptions
   where
     testTrace :: EmulatorTrace ()
     testTrace = do
+        h1 <- activateContractWallet w1 endpoints
+        h2 <- activateContractWallet w2 endpoints
+
+        callEndpoint @"start" h1 nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h1' <- activateContractWallet w1 endpoints
+
+        callEndpoint @"close" h1' nftEx1'
+        void $ Emulator.waitNSlots 1
+
+        callEndpoint @"buy" h2 nftEx1'
+        void $ Emulator.waitNSlots 1
+
+    walletsChange :: TracePredicate
+    walletsChange =
+             walletFundsChange w1 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+        .&&. walletFundsChange w2 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
+
+
+    emCfg :: EmulatorConfig
+    emCfg = EmulatorConfig (Left dist) def def
+      where
+        dist = Map.fromList
+            [ (w1, Ada.lovelaceValueOf 10_000_000 <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1)
+            , (w2, Ada.lovelaceValueOf 10_000_000)
+            ]
+
+
+-- We start the sale of NFT1 from wallet 3, but the NFT is closed so the constraints are invalidated.
+-- This doesn't sell the NFT1, since it's closed.
+-- We then start the sale again, and buy NFT1 from wallet 4.
+-- Then the wallet 4 starts the sale of NFT1 and wallet 3 buys it back.
+-- Disregarding fees, the transaction result is the same as it was.
+tokenClosingBuyingSellingBack :: TestTree
+tokenClosingBuyingSellingBack = checkPredicateOptions
+    (defaultCheckOptions & emulatorConfig .~ emCfg)
+    "token closing then buying and selling back trace"
+    walletsChange
+    testTrace
+  where
+    testTrace :: EmulatorTrace ()
+    testTrace = do
+
         h3 <- activateContractWallet w3 endpoints
         h4 <- activateContractWallet w4 endpoints
 
         callEndpoint @"start" h3 nftEx1
         void $ Emulator.waitNSlots 1
-        callEndpoint @"cancel" h3 (nftEx1')
+
+        h3' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"close" h3' (nftEx1')
         void $ Emulator.waitNSlots 1
+
+        -- Can't buy, closed.
         callEndpoint @"buy" h4 (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        h3'' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"start" h3'' nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h4' <- activateContractWallet w4 endpoints
+
+        callEndpoint @"buy" h4' (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        h4' <- activateContractWallet w4 endpoints
+
+        callEndpoint @"start" h4' nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h3'' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"buy" h3'' nftEx1'
         void $ Emulator.waitNSlots 1
 
     walletsChange :: TracePredicate
@@ -273,15 +364,78 @@ tokenSaleCanceled = checkPredicateOptions
              walletFundsChange w3 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
         .&&. walletFundsChange w4 (Ada.lovelaceValueOf 0 <> assetClassValue testAssetClassNft1 0)
 
+    emCfg :: EmulatorConfig
+    emCfg = EmulatorConfig (Left dist) def def
+      where
+        dist = Map.fromList
+            [ (w2, Ada.lovelaceValueOf 10_000_000)
+            , (w3, Ada.lovelaceValueOf 10_000_000
+                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1
+                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1)
+            , (w4, Ada.lovelaceValueOf 10_000_000)
+            ]
+
+
+-- We start the sale of NFT1 from wallet 3, but the NFT is closed so the constraints are invalidated.
+-- This doesn't sell the NFT1, since it's closed.
+-- We then start the sale again, and buy NFT1 from wallet 4.
+-- Then the wallet 4 starts the sale of NFT1 and wallet 2 buys it.
+tokenClosingBuyingSellingAnotherWallet :: TestTree
+tokenClosingBuyingSellingAnotherWallet = checkPredicateOptions
+    (defaultCheckOptions & emulatorConfig .~ emCfg)
+    "token closing then buying and selling back to another wallet trace"
+    walletsChange
+    testTrace
+  where
+    testTrace :: EmulatorTrace ()
+    testTrace = do
+
+        h3 <- activateContractWallet w3 endpoints
+        h4 <- activateContractWallet w4 endpoints
+
+        callEndpoint @"start" h3 nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h3' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"close" h3' (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        -- Can't buy, closed.
+        callEndpoint @"buy" h4 (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        h3'' <- activateContractWallet w3 endpoints
+
+        callEndpoint @"start" h3'' nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h4' <- activateContractWallet w4 endpoints
+
+        callEndpoint @"buy" h4' (nftEx1')
+        void $ Emulator.waitNSlots 1
+
+        h4'' <- activateContractWallet w4 endpoints
+
+        callEndpoint @"start" h4'' nftEx1
+        void $ Emulator.waitNSlots 1
+
+        h2 <- activateContractWallet w2 endpoints
+
+        callEndpoint @"buy" h2 nftEx1'
+        void $ Emulator.waitNSlots 1
+
+    walletsChange :: TracePredicate
+    walletsChange =
+             walletFundsChange w3 (Ada.lovelaceValueOf 1_000_000 <> assetClassValue testAssetClassNft1 (-1))
+        .&&. walletFundsChange w2 (Ada.lovelaceValueOf (-1_000_000) <> assetClassValue testAssetClassNft1 1)
 
     emCfg :: EmulatorConfig
     emCfg = EmulatorConfig (Left dist) def def
       where
         dist = Map.fromList
-            [ (knownWallet 3, Ada.lovelaceValueOf 10_000_000
-                <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1
-                <> Value.singleton (sCs nftEx2) (sTn nftEx2) 1)
-            , (knownWallet 4, Ada.lovelaceValueOf 10_000_000)
+            [ (w2, Ada.lovelaceValueOf 10_000_000)
+            , (w3, Ada.lovelaceValueOf 10_000_000 <> Value.singleton (sCs nftEx1) (sTn nftEx1) 1)
+            , (w4, Ada.lovelaceValueOf 10_000_000)
             ]
-
 

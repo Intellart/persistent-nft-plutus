@@ -24,7 +24,8 @@ import           Ledger               (ChainIndexTxOut, CurrencySymbol,
                                        ValidatorHash, getCardanoTxId,
                                        pubKeyHash, pubKeyHashAddress,
                                        scriptAddress, toTxOut)
-import           Ledger.Constraints   as Constraints (mustPayToOtherScript, mustBeSignedBy,
+import           Ledger.Constraints   as Constraints (mustBeSignedBy,
+                                                      mustPayToOtherScript,
                                                       mustPayToPubKey,
                                                       mustPayToTheScript,
                                                       mustSpendScriptOutput,
@@ -67,6 +68,7 @@ startSale sp = do
                   Constraints.typedValidatorLookups O2.typedBuyValidator
 
         tx      = Constraints.mustPayToTheScript nfts val
+
     ledgerTx <- submitTxConstraintsWith @O2.Sale lookups tx
     void $ awaitTxConfirmed $ getCardanoTxId ledgerTx
     Contract.logInfo @String "Starting sale, transaction confirmation"
@@ -104,6 +106,8 @@ cancel buyParams = do
     case sale of
         Nothing -> Contract.logError @String "Cancel, no sale found"
         Just (txOutRef, chainIndexTxOut, nftSale) -> do
+            Contract.logInfo @String "Cancel, trying to cancel."
+
             let r       = Redeemer $ PlutusTx.toBuiltinData Close
                 val     = Value.singleton (nCurrency nftSale) (nToken nftSale) 1
 
@@ -123,6 +127,7 @@ cancel buyParams = do
 -- Close, lock the NFT, unable to sell afterwards.
 close :: BuyParams -> Contract w SaleSchema Text ()
 close bp = do
+    pkh <- Contract.ownPubKeyHash
     sale <- findSale (bCs bp, bTn bp)
     case sale of
         Nothing -> Contract.logError @String "Closing, no sale found"
@@ -185,19 +190,18 @@ endpoints :: Contract () SaleSchema Text ()
 endpoints = selectList
     [ startEndpoint
     , buyEndpoint
-    , cancelEndpoint
     , closeEndpoint
     ]
 
 startEndpoint :: Promise () SaleSchema Text ()
-startEndpoint = endpoint @"start" $ \nfts -> startSale nfts
+startEndpoint = endpoint @"start" $ \nfts ->
+    startSale nfts
 
 buyEndpoint :: Promise () SaleSchema Text ()
-buyEndpoint = endpoint @"buy" $ \buyParams -> buy buyParams
-
-cancelEndpoint :: Promise () SaleSchema Text ()
-cancelEndpoint = endpoint @"cancel" $ \buyParams -> cancel buyParams
+buyEndpoint = endpoint @"buy" $ \buyParams ->
+    buy buyParams
 
 closeEndpoint :: Promise () SaleSchema Text ()
-closeEndpoint = endpoint @"close" $ \nfts -> close nfts
+closeEndpoint = endpoint @"close" $ \nfts ->
+    close nfts
 

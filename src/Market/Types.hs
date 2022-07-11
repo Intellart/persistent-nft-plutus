@@ -69,7 +69,6 @@ data BuyParams = BuyParams
     , bTn :: TokenName
     } deriving (Pr.Eq, Pr.Ord, Show, Generic, ToJSON, FromJSON, ToSchema)
 
-
 data StartParams = StartParams
     { sPrice :: Integer
     , sCs    :: CurrencySymbol
@@ -81,8 +80,6 @@ type SaleSchema =
     Endpoint "start" StartParams
     .\/
     Endpoint "buy" BuyParams
-    .\/
-    Endpoint "cancel" BuyParams
     .\/
     Endpoint "close" BuyParams
 
