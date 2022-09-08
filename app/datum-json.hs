@@ -1,20 +1,20 @@
 {-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NumericUnderscores  #-}
+{-# LANGUAGE OverloadedStrings   #-}
 
-import Data.Aeson as Json ( encode )
-import Data.ByteString.Lazy qualified as LB
-import System.Environment ( getArgs )
-import Prelude
-import Data.String (fromString)
+import           Data.Aeson           as Json (encode)
+import qualified Data.ByteString.Lazy as LB
+import           Data.String          (fromString)
+import           Prelude
+import           System.Environment   (getArgs)
 
-import Cardano.Api
-    ( scriptDataToJson,
-      ScriptDataJsonSchema(ScriptDataJsonDetailedSchema) )
-import Cardano.Api.Shelley ( fromPlutusData )
+import           Cardano.Api          (ScriptDataJsonSchema (ScriptDataJsonDetailedSchema),
+                                       scriptDataToJson)
+import           Cardano.Api.Shelley  (fromPlutusData)
+import qualified Plutus.V1.Ledger.Ada as Ada (lovelaceOf, getAda)
 import qualified PlutusTx
 
-import Market.Types (NFTSale(..))
+import           Market.Types         (NFTSale (..))
 
 -- This module is here to convert Haskell Data Types to JSON files, particularly used for NFTSale custom Datum Type.
 -- To use this enter `cabal run datum-json <price> <seller> <tn> <cs>`.
@@ -30,6 +30,15 @@ main = do
       tn     = fromString tn'
       cs     = fromString cs'
       nfts   = NFTSale seller price cs tn
+
+  let lovelaces = Ada.lovelaceOf (nPrice nfts)
+
+  putStrLn "==========================================="
+  putStrLn $ show nfts
+  putStrLn $ show lovelaces
+  putStrLn $ "ADA == " <> (show $ Ada.getAda lovelaces)
+  putStrLn "==========================================="
+
   writeData ("datum-" ++ show cs ++ "-" ++ tn' ++ ".json") nfts
   putStrLn "Done"
 -- Datum also needs to be passed when sending the token to the script (aka putting for sale)

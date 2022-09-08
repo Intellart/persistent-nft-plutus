@@ -51,10 +51,16 @@ library
                      , plutus-tx-plugin
                      , plutus-tx
                      , prettyprinter
+                     , freer-simple
                      , tagged
                      , text
                      , serialise
                      , cardano-api
+                     -- Testing
+                     , mtl
+                     , network
+                     , websockets
+
   hs-source-dirs:      src
   default-language:    Haskell2010
   ghc-options:         -Wall -fobject-code -fno-ignore-interface-pragmas -fno-omit-interface-pragmas -fno-strictness -fno-spec-constr -fno-specialise
@@ -68,6 +74,7 @@ executable market-plutus
 
   build-depends:        cardano-api
                       , nft
+                      , bech32
                       , plutus-ledger-api
                       , bytestring
                       , cardano-ledger-alonzo
@@ -80,6 +87,9 @@ executable datum-json
   ghc-options:          -threaded -rtsopts "-with-rtsopts=-T"
 
   build-depends:        nft
+                      , bech32
+                      , plutus-ledger
+                      , plutus-ledger-api
                       , bytestring
                       , cardano-api
                       , plutus-tx

@@ -1,20 +1,24 @@
 {-# LANGUAGE ImportQualifiedPost #-}
-{-# LANGUAGE NumericUnderscores #-}
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE NumericUnderscores  #-}
+{-# LANGUAGE OverloadedStrings   #-}
 
-module SerialiseJSON (testR, testD) where
+module SerialiseJSON
+    ( testR
+    , testD
+    , writeData
+    , toJsonString
+    ) where
 
-import Data.Aeson as Json ( encode )
-import Data.ByteString.Lazy qualified as LB
+import           Data.Aeson           as Json (encode)
+import qualified Data.ByteString.Lazy as LB
 
 
-import Cardano.Api
-    ( scriptDataToJson,
-      ScriptDataJsonSchema(ScriptDataJsonDetailedSchema) )
-import Cardano.Api.Shelley ( fromPlutusData )
+import           Cardano.Api          (ScriptDataJsonSchema (ScriptDataJsonDetailedSchema),
+                                       scriptDataToJson)
+import           Cardano.Api.Shelley  (fromPlutusData)
 import qualified PlutusTx
 
-import Market.Types (SaleAction(..), NFTSale(..))
+import           Market.Types         (NFTSale (..), SaleAction (..))
 
 -- This module is here to convert Haskell Data Types to JSON files, particularly used for Redeemer and Datum
 -- To use this enter `cabal repl` ; `:l src/SerialiseJSON.hs` ; `testR` or `testD`
@@ -29,10 +33,10 @@ testR = do
 
 nftEx :: NFTSale
 nftEx = NFTSale
-    { nPrice    = 1
-    , nSeller   = "4b4355acf5e549d4cd26408723d1c8d87a98db7598e40bb1cd3b343e"
-    , nToken    = "Vendere"
-    , nCurrency = "8b050684e8d7e1abb2b79227f44c4c767025decb140e64efc783d046"
+    { nPrice    = 5_000_000
+    , nSeller   = "603517a452f0fec8c6fc816993f39eebf32fad8bd00cc1ffa4f2d02170"
+    , nToken    = "NFT7"
+    , nCurrency = "d9754fadcb64bca0ae4f5a4b447242538073a4e4bf1239ee25ee5e6c" -- policyID
     } -- This is an example to fill with real data
       -- The `nSeller` needs to be in Base16 format, not Bech32 (addr1...).
       -- To easily get the Base16 version, go to Cardanoscan.io, search the address in format addr1...

@@ -5,6 +5,9 @@
 
 module Market.Offchain
     ( endpoints
+    , startSale
+    , buy
+    , close
     )
     where
 

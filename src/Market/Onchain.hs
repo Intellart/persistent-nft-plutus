@@ -17,6 +17,9 @@ module Market.Onchain
     , nftDatumHashToMNFTSale
     ) where
 
+import           Prelude                     (Ordering (..), compare, read,
+                                              show)
+
 import           Codec.Serialise             (serialise)
 import qualified Data.ByteString.Lazy        as LB
 import qualified Data.ByteString.Short       as SBS
@@ -40,16 +43,22 @@ import qualified Plutus.V1.Ledger.Ada        as Ada (Ada (getLovelace),
                                                      fromValue, lovelaceOf)
 import           Plutus.V1.Ledger.Credential (Credential (ScriptCredential))
 import qualified Plutus.V1.Ledger.Scripts    as Plutus
-import qualified PlutusTx
-import           PlutusTx.Prelude            as Plutus (Bool (..), Eq ((==)),
-                                                        Integer, Maybe (..),
-                                                        Ord, all, any, filter,
-                                                        fmap, fromInteger, head,
-                                                        length, map,
-                                                        traceIfFalse, ($), (%),
-                                                        (&&), (*), (-), (.),
-                                                        (<=), (>=), (||))
 
+import           PlutusTx.Builtins.Class
+import           PlutusTx.Builtins
+import qualified PlutusTx
+import           PlutusTx.Prelude            as Plutus (Bool (..),
+                                                        BuiltinString, Eq (..),
+                                                        Integer, Maybe (..),
+                                                        Ord, all, any, decodeUtf8,
+                                                        appendString, filter,
+                                                        fmap, fromInteger, head,
+                                                        length, map, trace,
+                                                        traceIfFalse, traceError,
+                                                        traceIfTrue, ($), (%),
+                                                        (&&), (*), (-), (.),
+                                                        (<), (<=), (<>), (>),
+                                                        (>=), (||))
 
 import           Market.Types                (NFTSale (..), SaleAction (..))
 
@@ -65,14 +74,58 @@ nftDatumHashToMNFTSale txOut datumHashTOMDatumF = do
 mkBuyValidator :: NFTSale -> SaleAction -> ScriptContext -> Bool
 mkBuyValidator nfts saleAction scriptCtx = case saleAction of
     Buy     -> traceIfFalse "There are multiple signatures." singleSignature
-               && traceIfFalse "There are multiple tokens." singleTokenValue
-               && traceIfFalse "The price of NFT does not match." checkSellerHasPaidCorrectPrice
+               -- && traceIfFalse "There are multiple tokens." singleTokenValue
+
+               -- Useful for debugging.
+               -- && traceIfTrue "Buyer ADA > NFT ADA." checkBuyerHasMoreADA
+               -- && traceIfTrue "Buyer ADA < NFT ADA." checkBuyerHasLessADA
+
+               && traceIfFalse "Buyer has not paid to NFT seller, input 0 ADA." checkBuyerHasPaid
+               && traceIfFalse "The price of NFT does not match. Buyer ADA < NFT ADA." checkBuyerHasPaidCorrectPrice
+
                && traceIfFalse "There are not single purchases of the NFT." checkSingleBuy
                && traceIfFalse "NFT policy failed." checkNFTPolicy
                -- && uniqueToken -- TODO(KS): This is hard to validate, we need to figure that out from the blockchain.
-    Close   -> txSignedBy (scriptContextTxInfo scriptCtx) (nSeller nfts)
+    Close   ->
+        let txSignedByAddress :: TxInfo
+            txSignedByAddress = scriptContextTxInfo scriptCtx
 
+            sellerAddress :: PubKeyHash
+            sellerAddress = nSeller nfts
+
+         in traceIfFalse (wrongSignatureTrace txSignedByAddress sellerAddress) (txSignedBy txSignedByAddress sellerAddress)
   where
+
+    -- Issues with runtime representation of strings in the trace.
+    wrongSignatureTrace :: TxInfo -> PubKeyHash -> BuiltinString
+    wrongSignatureTrace _txSignedByAddress _sellerAddress =
+        "NFT policy failed, NFT seller not signed."
+
+    -- Checking that the price paid is the correct one.
+    checkBuyerHasPaid :: Bool
+    checkBuyerHasPaid = checkPrice (nSeller nfts)
+      where
+        -- We need to pay the seller the price of NFT.
+        checkPrice :: PubKeyHash -> Bool
+        checkPrice seller = Ada.fromValue (valuePaidTo scriptTxInfo seller) > 0
+
+    -- Checking that the price paid is the correct one.
+    checkBuyerHasLessADA :: Bool
+    checkBuyerHasLessADA = checkPrice (nSeller nfts) (nPrice nfts)
+      where
+        -- We need to pay the seller the price of NFT.
+        checkPrice :: PubKeyHash -> Integer -> Bool
+        checkPrice seller price = Ada.fromValue (valuePaidTo scriptTxInfo seller) < Ada.lovelaceOf price
+
+    -- Checking that the price paid is the correct one.
+    checkBuyerHasPaidCorrectPrice :: Bool
+    checkBuyerHasPaidCorrectPrice = checkPrice (nSeller nfts) (nPrice nfts)
+      where
+        -- We need to pay the seller the price of NFT.
+        checkPrice :: PubKeyHash -> Integer -> Bool
+        checkPrice seller price = Ada.fromValue (valuePaidTo scriptTxInfo seller) >= Ada.lovelaceOf price
+
+
     -- Get the transaction info.
     scriptTxInfo :: TxInfo
     scriptTxInfo = scriptContextTxInfo scriptCtx
@@ -81,10 +134,6 @@ mkBuyValidator nfts saleAction scriptCtx = case saleAction of
     signatureKeyHash :: PubKeyHash
     signatureKeyHash = case txInfoSignatories scriptTxInfo of
             [pubKeyHash] -> pubKeyHash
-
-    -- Checking that the price paid is the correct one.
-    checkSellerHasPaidCorrectPrice :: Bool
-    checkSellerHasPaidCorrectPrice = checkSellerOut (nSeller nfts) (nPrice nfts)
 
     -- Checking we can have the UTxO consumed and a single NFT minted.
     checkNFTPolicy :: Bool
@@ -124,14 +173,10 @@ mkBuyValidator nfts saleAction scriptCtx = case saleAction of
 
          in length txOutFromPendingTx == 1
 
-    -- We need to pay the seller the price of NFT.
-    checkSellerOut :: PubKeyHash -> Integer -> Bool
-    checkSellerOut seller price = Ada.fromValue (valuePaidTo scriptTxInfo seller) == Ada.lovelaceOf price
-
 
 data Sale
 instance Scripts.ValidatorTypes Sale where
-    type instance DatumType Sale    = NFTSale
+    type instance DatumType Sale = NFTSale
     type instance RedeemerType Sale = SaleAction
 
 

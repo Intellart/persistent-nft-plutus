@@ -32,7 +32,7 @@ data NFTSale = NFTSale
     , nPrice    :: !Plutus.Integer
     , nCurrency :: !CurrencySymbol
     , nToken    :: !TokenName
-    } deriving (Generic, ToJSON, FromJSON)
+    } deriving (Generic, ToJSON, FromJSON, Show)
 
 instance Eq NFTSale where
     {-# INLINABLE (==) #-}
